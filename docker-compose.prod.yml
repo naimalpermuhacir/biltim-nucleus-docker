@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: biltim-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: biltim_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: biltim
+    volumes:
+      - biltim_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U biltim_app -d biltim"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - biltim_internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: biltim-redis
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - biltim_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - biltim_internal
+
+  be:
+    build:
+      context: .
+      dockerfile: apps/be/Dockerfile.prod
+    container_name: biltim-be
+    restart: always
+    env_file:
+      - apps/be/.env.production
+    environment:
+      DATABASE_URL: postgresql://biltim_app:${POSTGRES_PASSWORD}@postgres:5432/biltim
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${BIND_IP}:1001:1001"
+    networks:
+      - biltim_internal
+
+  fe:
+    build:
+      context: .
+      dockerfile: apps/fe/Dockerfile.prod
+    container_name: biltim-fe
+    restart: always
+    env_file:
+      - apps/fe/.env.production
+    environment:
+      AUTH_API_URL: http://be:1001
+    depends_on:
+      - be
+    networks:
+      - biltim_internal
+    expose:
+      - "3000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: biltim-nginx
+    restart: always
+    ports:
+      - "${BIND_IP}:80:80"
+    volumes:
+      - ./deploy/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - fe
+      - be
+    networks:
+      - biltim_internal
+
+networks:
+  biltim_internal:
+    driver: bridge
+
+volumes:
+  biltim_postgres_data:
+  biltim_redis_data:

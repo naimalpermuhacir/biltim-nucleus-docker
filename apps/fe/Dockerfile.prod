@@ -1,0 +1,31 @@
+FROM oven/bun:1.2.23 AS builder
+WORKDIR /app
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+RUN bun install --frozen-lockfile || bun install \
+  && mkdir -p node_modules/next/dist/node_modules \
+  && ln -sf ../../../babel-plugin-react-compiler node_modules/next/dist/node_modules/babel-plugin-react-compiler
+
+WORKDIR /app/apps/fe
+RUN node ../../node_modules/next/dist/bin/next build
+WORKDIR /app
+
+FROM oven/bun:1.2.23 AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
+
+COPY --from=builder /app/apps/fe/.next/standalone ./
+COPY --from=builder /app/apps/fe/.next/static ./apps/fe/.next/static
+COPY --from=builder /app/apps/fe/public ./apps/fe/public
+
+EXPOSE 3000
+CMD ["bun", "apps/fe/server.js"]
